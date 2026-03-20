@@ -37,6 +37,7 @@ class _DriverScreenState extends State<DriverScreen> {
   double? _speed;
   double? _heading;
   DateTime? _lastUpdate;
+  bool _sessionRestored = false;
 
   @override
   void initState() {
@@ -105,6 +106,7 @@ class _DriverScreenState extends State<DriverScreen> {
       _activity = snapshot.activity;
       _isMoving = snapshot.isMoving;
       _storedCount = snapshot.storedCount;
+      _sessionRestored = BackgroundTrackingService.instance.sessionRestored;
       _loading = false;
 
       if (currentPoint != null) {
@@ -121,6 +123,12 @@ class _DriverScreenState extends State<DriverScreen> {
 
     LocationBus.instance.emit(_current);
 
+    if (_running && _sessionRestored) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sesion restaurada automaticamente')),
+      );
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fitToFullRoute();
     });
@@ -130,8 +138,10 @@ class _DriverScreenState extends State<DriverScreen> {
     setState(() => _loading = true);
 
     try {
+      final sessionId = BackgroundTrackingService.instance.generateSessionId();
+
       await BackgroundTrackingService.instance.startTracking(
-        sessionId: 'demo-delivery-001',
+        sessionId: sessionId,
       );
 
       final point = await BackgroundTrackingService.instance
@@ -142,6 +152,7 @@ class _DriverScreenState extends State<DriverScreen> {
       setState(() {
         _running = true;
         _loading = false;
+        _sessionRestored = false;
 
         if (point != null) {
           _current = point.toLatLng();
@@ -181,6 +192,7 @@ class _DriverScreenState extends State<DriverScreen> {
       setState(() {
         _running = false;
         _loading = false;
+        _sessionRestored = false;
       });
     } catch (e) {
       if (!mounted) return;
@@ -462,6 +474,8 @@ class _DriverScreenState extends State<DriverScreen> {
   Widget build(BuildContext context) {
     final statusText = _loading
         ? 'Cargando tracking...'
+        : _sessionRestored
+        ? 'Sesion restaurada automaticamente'
         : _running
         ? 'Tracking real activo'
         : 'Tracking detenido';

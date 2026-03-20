@@ -16,8 +16,6 @@ class ViewerScreen extends StatefulWidget {
 }
 
 class _ViewerScreenState extends State<ViewerScreen> {
-  static const String _sessionId = 'demo-delivery-001';
-
   final MapController _mapController = MapController();
 
   StreamSubscription<LatLng>? _sub;
@@ -32,6 +30,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
   bool _loadingRemote = true;
   bool _realtimeConnected = false;
   String _dataSource = 'remote';
+  bool _loadingSessions = true;
+  String? _selectedSessionId;
+  List<Map<String, dynamic>> _sessions = const [];
 
   @override
   void initState() {
@@ -59,13 +60,39 @@ class _ViewerScreenState extends State<ViewerScreen> {
     _listenLocalFallback();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _loadInitialPoints();
-      _listenRealtime();
+      await _loadSessions();
+      await _loadSelectedSession();
 
       if (mounted) {
         _fitToFullRoute();
       }
     });
+  }
+
+  Future<void> _loadSessions() async {
+    try {
+      final sessions = await TrackingRepository.instance.listSessions();
+
+      if (!mounted) return;
+
+      setState(() {
+        _sessions = sessions;
+        _selectedSessionId = sessions.isNotEmpty
+            ? sessions.first['session_id']?.toString()
+            : null;
+        _loadingSessions = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _loadingSessions = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudieron cargar sesiones: $e')),
+      );
+    }
   }
 
   void _listenLocalFallback() {
@@ -87,10 +114,31 @@ class _ViewerScreenState extends State<ViewerScreen> {
     });
   }
 
-  Future<void> _loadInitialPoints() async {
+  Future<void> _loadSelectedSession() async {
+    final sessionId = _selectedSessionId;
+    if (sessionId == null) {
+      if (!mounted) return;
+
+      setState(() {
+        _trail
+          ..clear()
+          ..add(_current);
+        _loadingRemote = false;
+        _realtimeConnected = false;
+        _dataSource = 'local';
+      });
+      return;
+    }
+
+    setState(() {
+      _loadingRemote = true;
+      _realtimeConnected = false;
+      _trail.clear();
+    });
+
     try {
       final rows = await TrackingRepository.instance.getPointsBySession(
-        _sessionId,
+        sessionId,
       );
 
       if (!mounted) return;
@@ -117,8 +165,14 @@ class _ViewerScreenState extends State<ViewerScreen> {
       } else {
         setState(() {
           _loadingRemote = false;
+          _dataSource = 'remote';
+          _trail
+            ..clear()
+            ..add(_current);
         });
       }
+
+      _listenRealtime();
     } catch (e) {
       if (!mounted) return;
 
@@ -134,8 +188,11 @@ class _ViewerScreenState extends State<ViewerScreen> {
   }
 
   void _listenRealtime() {
+    final sessionId = _selectedSessionId;
+    if (sessionId == null) return;
+
     TrackingRealtimeService.instance.subscribeToSessionPoints(
-      sessionId: _sessionId,
+      sessionId: sessionId,
       onInsert: (row) {
         if (!mounted) return;
 
@@ -248,7 +305,11 @@ class _ViewerScreenState extends State<ViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final status = _loadingRemote
+    final status = _loadingSessions
+        ? 'Viewer: cargando sesiones...'
+        : _selectedSessionId == null
+        ? 'Viewer: sin session seleccionada'
+        : _loadingRemote
         ? 'Viewer: cargando historial remoto...'
         : _realtimeConnected
         ? 'Viewer: realtime Supabase activo'
@@ -284,61 +345,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          _TopBar(status: status, current: _current),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                Chip(
-                  avatar: const Icon(Icons.route, size: 18),
-                  label: Text('Trail points: ${_trail.length}'),
-                ),
-                Chip(
-                  avatar: const Icon(Icons.access_time, size: 18),
-                  label: Text('Última señal: ${_lastUpdateText()}'),
-                ),
-                Chip(
-                  avatar: Icon(
-                    _autoFollowViewer ? Icons.gps_fixed : Icons.gps_not_fixed,
-                    size: 18,
-                  ),
-                  label: Text(
-                    _autoFollowViewer ? 'Auto-follow ON' : 'Auto-follow OFF',
-                  ),
-                ),
-                Chip(
-                  avatar: Icon(
-                    _realtimeConnected ? Icons.cloud_done : Icons.cloud_off,
-                    size: 18,
-                  ),
-                  label: Text(
-                    _realtimeConnected ? 'Realtime ON' : 'Realtime OFF',
-                  ),
-                ),
-                Chip(
-                  avatar: const Icon(Icons.storage, size: 18),
-                  label: Text('Source: $_dataSource'),
-                ),
-                Chip(
-                  avatar: const Icon(Icons.flag, size: 18),
-                  label: Text(
-                    'A ${DemoRoute.pointA.latitude.toStringAsFixed(5)}, ${DemoRoute.pointA.longitude.toStringAsFixed(5)}',
-                  ),
-                ),
-                Chip(
-                  avatar: const Icon(Icons.place, size: 18),
-                  label: Text(
-                    'B ${DemoRoute.pointB.latitude.toStringAsFixed(5)}, ${DemoRoute.pointB.longitude.toStringAsFixed(5)}',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
+          Positioned.fill(
             child: FlutterMap(
               mapController: _mapController,
               options: MapOptions(
@@ -405,38 +414,89 @@ class _ViewerScreenState extends State<ViewerScreen> {
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.center,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _fitToFullRoute,
-                  icon: const Icon(Icons.route),
-                  label: const Text('Ver ruta completa'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _centerOnViewer,
-                  icon: const Icon(Icons.my_location),
-                  label: const Text('Ir al viewer'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _toggleAutoFollow,
-                  icon: Icon(
-                    _autoFollowViewer ? Icons.gps_fixed : Icons.gps_not_fixed,
+          Positioned(
+            top: 12,
+            left: 12,
+            right: 12,
+            child: _ViewerOverlayCard(
+              status: status,
+              current: _current,
+              selectedSessionId: _selectedSessionId,
+              sessions: _sessions,
+              loadingSessions: _loadingSessions,
+              trailLength: _trail.length,
+              lastUpdateText: _lastUpdateText(),
+              autoFollowViewer: _autoFollowViewer,
+              realtimeConnected: _realtimeConnected,
+              dataSource: _dataSource,
+              pointA: DemoRoute.pointA,
+              pointB: DemoRoute.pointB,
+              onSessionChanged: (value) async {
+                if (value == null || value == _selectedSessionId) {
+                  return;
+                }
+
+                setState(() {
+                  _selectedSessionId = value;
+                });
+
+                await _loadSelectedSession();
+
+                if (mounted) {
+                  _fitToFullRoute();
+                }
+              },
+              onRefresh: () async {
+                setState(() {
+                  _loadingSessions = true;
+                });
+
+                await _loadSessions();
+                await _loadSelectedSession();
+
+                if (mounted) {
+                  _fitToFullRoute();
+                }
+              },
+            ),
+          ),
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 12,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  FilledButton.icon(
+                    onPressed: _fitToFullRoute,
+                    icon: const Icon(Icons.route),
+                    label: const Text('Ruta completa'),
                   ),
-                  label: Text(
-                    _autoFollowViewer ? 'Auto-follow ON' : 'Auto-follow OFF',
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: _centerOnViewer,
+                    icon: const Icon(Icons.my_location),
+                    label: const Text('Ir al viewer'),
                   ),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _clearTrail,
-                  icon: const Icon(Icons.delete_outline),
-                  label: const Text('Limpiar trail'),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: _toggleAutoFollow,
+                    icon: Icon(
+                      _autoFollowViewer ? Icons.gps_fixed : Icons.gps_not_fixed,
+                    ),
+                    label: Text(
+                      _autoFollowViewer ? 'Auto-follow ON' : 'Auto-follow OFF',
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: _clearTrail,
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Limpiar trail'),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -445,30 +505,155 @@ class _ViewerScreenState extends State<ViewerScreen> {
   }
 }
 
-class _TopBar extends StatelessWidget {
-  const _TopBar({required this.status, required this.current});
+class _ViewerOverlayCard extends StatelessWidget {
+  const _ViewerOverlayCard({
+    required this.status,
+    required this.current,
+    required this.selectedSessionId,
+    required this.sessions,
+    required this.loadingSessions,
+    required this.trailLength,
+    required this.lastUpdateText,
+    required this.autoFollowViewer,
+    required this.realtimeConnected,
+    required this.dataSource,
+    required this.pointA,
+    required this.pointB,
+    required this.onSessionChanged,
+    required this.onRefresh,
+  });
 
   final String status;
   final LatLng current;
+  final String? selectedSessionId;
+  final List<Map<String, dynamic>> sessions;
+  final bool loadingSessions;
+  final int trailLength;
+  final String lastUpdateText;
+  final bool autoFollowViewer;
+  final bool realtimeConnected;
+  final String dataSource;
+  final LatLng pointA;
+  final LatLng pointB;
+  final Future<void> Function(String? value) onSessionChanged;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
     final lat = current.latitude.toStringAsFixed(6);
     final lng = current.longitude.toStringAsFixed(6);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-      child: Row(
-        children: [
-          const Icon(Icons.info_outline),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '$status\nLat: $lat  Lng: $lng',
-              style: const TextStyle(fontWeight: FontWeight.w600),
+    return Card(
+      elevation: 10,
+      color: Colors.white.withOpacity(0.94),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.info_outline),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '$status\nLat: $lat  Lng: $lng',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: selectedSessionId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Session',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: sessions.map((session) {
+                      final sessionId = session['session_id']?.toString() ?? '';
+                      final status = session['status']?.toString() ?? '-';
+                      return DropdownMenuItem<String>(
+                        value: sessionId,
+                        child: Text('$sessionId ($status)'),
+                      );
+                    }).toList(),
+                    onChanged: loadingSessions
+                        ? null
+                        : (value) async {
+                            await onSessionChanged(value);
+                          },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Recargar sesiones',
+                  onPressed: onRefresh,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                Chip(
+                  avatar: const Icon(Icons.route, size: 18),
+                  label: Text('Trail: $trailLength'),
+                ),
+                Chip(
+                  avatar: const Icon(Icons.access_time, size: 18),
+                  label: Text('Ultima: $lastUpdateText'),
+                ),
+                Chip(
+                  avatar: Icon(
+                    autoFollowViewer ? Icons.gps_fixed : Icons.gps_not_fixed,
+                    size: 18,
+                  ),
+                  label: Text(
+                    autoFollowViewer ? 'Auto-follow ON' : 'Auto-follow OFF',
+                  ),
+                ),
+                Chip(
+                  avatar: Icon(
+                    realtimeConnected ? Icons.cloud_done : Icons.cloud_off,
+                    size: 18,
+                  ),
+                  label: Text(
+                    realtimeConnected ? 'Realtime ON' : 'Realtime OFF',
+                  ),
+                ),
+                Chip(
+                  avatar: const Icon(Icons.storage, size: 18),
+                  label: Text('Source: $dataSource'),
+                ),
+                Chip(
+                  avatar: const Icon(Icons.tag, size: 18),
+                  label: Text('Session: ${selectedSessionId ?? '-'}'),
+                ),
+                Chip(
+                  avatar: const Icon(Icons.flag, size: 18),
+                  label: Text(
+                    'A ${pointA.latitude.toStringAsFixed(5)}, ${pointA.longitude.toStringAsFixed(5)}',
+                  ),
+                ),
+                Chip(
+                  avatar: const Icon(Icons.place, size: 18),
+                  label: Text(
+                    'B ${pointB.latitude.toStringAsFixed(5)}, ${pointB.longitude.toStringAsFixed(5)}',
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

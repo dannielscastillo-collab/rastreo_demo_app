@@ -64,6 +64,15 @@ class TrackingRepository {
     });
   }
 
+  Future<List<Map<String, dynamic>>> listSessions() async {
+    final result = await _client
+        .from('tracking_sessions')
+        .select('session_id, driver_id, status, ended_at')
+        .order('session_id', ascending: false);
+
+    return List<Map<String, dynamic>>.from(result);
+  }
+
   Future<List<Map<String, dynamic>>> getPointsBySession(
     String sessionId,
   ) async {

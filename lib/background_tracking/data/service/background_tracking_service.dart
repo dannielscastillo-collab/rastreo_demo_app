@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter_background_geolocation/flutter_background_geolocation.dart'
     as bg;
 import 'package:latlong2/latlong.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'tracking_repository.dart';
 
 class TrackingPoint {
@@ -64,6 +66,8 @@ class BackgroundTrackingService {
   BackgroundTrackingService._();
   static final BackgroundTrackingService instance =
       BackgroundTrackingService._();
+  static const String _activeSessionStorageKey =
+      'background_tracking.active_session_id';
 
   final StreamController<TrackingPoint> _locationController =
       StreamController<TrackingPoint>.broadcast();
@@ -76,10 +80,12 @@ class BackgroundTrackingService {
   String? _currentSessionId;
   String _lastActivity = 'unknown';
   bool _isMoving = false;
+  bool _sessionRestored = false;
 
   Stream<TrackingPoint> get stream => _locationController.stream;
   Stream<TrackingStatusSnapshot> get statusStream => _statusController.stream;
   TrackingPoint? get lastPoint => _lastPoint;
+  bool get sessionRestored => _sessionRestored;
 
   Future<void> init() async {
     if (_initialized) return;
@@ -205,12 +211,16 @@ class BackgroundTrackingService {
       ),
     );
 
+    await _restoreTrackingSession();
+
     _initialized = true;
     await _emitStatus();
   }
 
   Future<void> startTracking({required String sessionId}) async {
     _currentSessionId = sessionId;
+    _sessionRestored = false;
+    await _persistCurrentSessionId(sessionId);
 
     await bg.BackgroundGeolocation.setConfig(
       bg.Config(
@@ -237,6 +247,12 @@ class BackgroundTrackingService {
     await _emitStatus();
   }
 
+  String generateSessionId() {
+    final randomValue = Random.secure().nextInt(1 << 32);
+    final timestamp = DateTime.now().toUtc().microsecondsSinceEpoch;
+    return 'tracking-$timestamp-${randomValue.toRadixString(16)}';
+  }
+
   Future<void> stopTracking() async {
     await bg.BackgroundGeolocation.stop();
 
@@ -250,6 +266,7 @@ class BackgroundTrackingService {
     }
 
     _currentSessionId = null;
+    await _clearPersistedSessionId();
     await _emitStatus();
   }
 
@@ -370,5 +387,36 @@ class BackgroundTrackingService {
     await bg.BackgroundGeolocation.removeListeners();
     await _locationController.close();
     await _statusController.close();
+  }
+
+  Future<void> _restoreTrackingSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final persistedSessionId = prefs.getString(_activeSessionStorageKey);
+    final state = await bg.BackgroundGeolocation.state;
+
+    if (state.enabled && persistedSessionId != null && persistedSessionId.isNotEmpty) {
+      _currentSessionId = persistedSessionId;
+      _sessionRestored = true;
+      final point = await getCurrentPosition();
+      if (point != null) {
+        _lastPoint = point;
+      }
+      return;
+    }
+
+    if (!state.enabled) {
+      _sessionRestored = false;
+      await _clearPersistedSessionId();
+    }
+  }
+
+  Future<void> _persistCurrentSessionId(String sessionId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_activeSessionStorageKey, sessionId);
+  }
+
+  Future<void> _clearPersistedSessionId() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_activeSessionStorageKey);
   }
 }
