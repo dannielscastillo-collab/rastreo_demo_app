@@ -2,11 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'background_tracking/data/service/background_tracking_service.dart';
 import 'background_tracking/presentation/screens/driver_screen.dart';
 import 'background_tracking/presentation/screens/viewer_screen.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -64,22 +64,44 @@ class TrackingBridge {
   }
 }
 
-/// Ruta demo visual para pintar referencia en el mapa
+/// Ruta demo / real para pintar referencia en el mapa
 class DemoRoute {
-  static const LatLng pointA = LatLng(37.324628, -122.024158);
-  static const LatLng pointB = LatLng(37.331900, -122.030800);
+  DemoRoute._();
 
-  static const List<LatLng> points = [
-    LatLng(37.324628, -122.024158), // A
-    LatLng(37.325200, -122.024700),
-    LatLng(37.325900, -122.025400),
-    LatLng(37.326700, -122.026100),
-    LatLng(37.327600, -122.026900),
-    LatLng(37.328500, -122.027700),
-    LatLng(37.329500, -122.028600),
-    LatLng(37.330700, -122.029700),
-    LatLng(37.331900, -122.030800), // B
-  ];
+  static final ValueNotifier<int> revision = ValueNotifier<int>(0);
+
+  static LatLng pointA = const LatLng(
+    14.5876983794952,
+    -90.51379445428621,
+  ); // EUROPLAZA
+
+  static LatLng pointB = const LatLng(
+    14.584228945836376,
+    -90.51422506734473,
+  ); // DÉCIMA PLAZA
+
+  static List<LatLng> points = <LatLng>[pointA, pointB];
+
+  static void setPointA(LatLng value) {
+    pointA = value;
+    _rebuildPoints();
+  }
+
+  static void setPointB(LatLng value) {
+    pointB = value;
+    _rebuildPoints();
+  }
+
+  static void setFromCurrent({LatLng? pointAValue, LatLng? pointBValue}) {
+    if (pointAValue != null) pointA = pointAValue;
+    if (pointBValue != null) pointB = pointBValue;
+    _rebuildPoints();
+  }
+
+  static void _rebuildPoints() {
+    points = <LatLng>[pointA, pointB];
+    revision.value++;
+  }
 }
 
 class RastreoDemoApp extends StatelessWidget {

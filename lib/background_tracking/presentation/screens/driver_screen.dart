@@ -19,6 +19,7 @@ class _DriverScreenState extends State<DriverScreen> {
 
   StreamSubscription<TrackingPoint>? _locationSub;
   StreamSubscription<TrackingStatusSnapshot>? _statusSub;
+  VoidCallback? _routeListener;
 
   bool _running = false;
   bool _loading = true;
@@ -42,6 +43,12 @@ class _DriverScreenState extends State<DriverScreen> {
     super.initState();
 
     LocationBus.instance.emit(_current);
+
+    _routeListener = () {
+      if (!mounted) return;
+      setState(() {});
+    };
+    DemoRoute.revision.addListener(_routeListener!);
 
     _locationSub = BackgroundTrackingService.instance.stream.listen((point) {
       if (!mounted) return;
@@ -238,6 +245,68 @@ class _DriverScreenState extends State<DriverScreen> {
     }
   }
 
+  Future<void> _setCurrentAsPointA() async {
+    try {
+      final point = await BackgroundTrackingService.instance
+          .getCurrentPosition();
+      if (!mounted || point == null) return;
+
+      final latLng = point.toLatLng();
+
+      setState(() {
+        DemoRoute.setPointA(latLng);
+      });
+
+      _fitToFullRoute();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Punto A actualizado: '
+            '${latLng.latitude.toStringAsFixed(6)}, '
+            '${latLng.longitude.toStringAsFixed(6)}',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error actualizando Punto A: $e')));
+    }
+  }
+
+  Future<void> _setCurrentAsPointB() async {
+    try {
+      final point = await BackgroundTrackingService.instance
+          .getCurrentPosition();
+      if (!mounted || point == null) return;
+
+      final latLng = point.toLatLng();
+
+      setState(() {
+        DemoRoute.setPointB(latLng);
+      });
+
+      _fitToFullRoute();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Punto B actualizado: '
+            '${latLng.latitude.toStringAsFixed(6)}, '
+            '${latLng.longitude.toStringAsFixed(6)}',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error actualizando Punto B: $e')));
+    }
+  }
+
   void _fitToFullRoute() {
     final points = <LatLng>[
       DemoRoute.pointA,
@@ -276,6 +345,30 @@ class _DriverScreenState extends State<DriverScreen> {
             child: Wrap(
               runSpacing: 10,
               children: [
+                ListTile(
+                  leading: const Icon(Icons.my_location),
+                  title: const Text('Usar ubicación actual como Punto A'),
+                  subtitle: Text(
+                    '${DemoRoute.pointA.latitude.toStringAsFixed(6)}, '
+                    '${DemoRoute.pointA.longitude.toStringAsFixed(6)}',
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _setCurrentAsPointA();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.location_on),
+                  title: const Text('Usar ubicación actual como Punto B'),
+                  subtitle: Text(
+                    '${DemoRoute.pointB.latitude.toStringAsFixed(6)}, '
+                    '${DemoRoute.pointB.longitude.toStringAsFixed(6)}',
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _setCurrentAsPointB();
+                  },
+                ),
                 ListTile(
                   leading: const Icon(Icons.route),
                   title: const Text('Ver ruta completa'),
@@ -359,6 +452,9 @@ class _DriverScreenState extends State<DriverScreen> {
   void dispose() {
     _locationSub?.cancel();
     _statusSub?.cancel();
+    if (_routeListener != null) {
+      DemoRoute.revision.removeListener(_routeListener!);
+    }
     super.dispose();
   }
 
@@ -451,7 +547,6 @@ class _DriverScreenState extends State<DriverScreen> {
               ),
             ],
           ),
-
           Positioned(
             top: 12,
             left: 12,
@@ -465,6 +560,8 @@ class _DriverScreenState extends State<DriverScreen> {
               speed: _formatDouble(_speed),
               update: _formatLastUpdate(),
               autoFollowDriver: _autoFollowDriver,
+              pointA: DemoRoute.pointA,
+              pointB: DemoRoute.pointB,
             ),
           ),
         ],
@@ -500,6 +597,8 @@ class _DriverInfoCard extends StatelessWidget {
     required this.speed,
     required this.update,
     required this.autoFollowDriver,
+    required this.pointA,
+    required this.pointB,
   });
 
   final String statusText;
@@ -510,6 +609,8 @@ class _DriverInfoCard extends StatelessWidget {
   final String speed;
   final String update;
   final bool autoFollowDriver;
+  final LatLng pointA;
+  final LatLng pointB;
 
   @override
   Widget build(BuildContext context) {
@@ -543,6 +644,16 @@ class _DriverInfoCard extends StatelessWidget {
                       ? Icons.gps_fixed
                       : Icons.gps_not_fixed,
                   label: autoFollowDriver ? 'Follow ON' : 'Follow OFF',
+                ),
+                _MiniChip(
+                  icon: Icons.flag,
+                  label:
+                      'A ${pointA.latitude.toStringAsFixed(5)}, ${pointA.longitude.toStringAsFixed(5)}',
+                ),
+                _MiniChip(
+                  icon: Icons.place,
+                  label:
+                      'B ${pointB.latitude.toStringAsFixed(5)}, ${pointB.longitude.toStringAsFixed(5)}',
                 ),
               ],
             ),

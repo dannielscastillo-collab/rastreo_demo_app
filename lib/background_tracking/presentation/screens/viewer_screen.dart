@@ -19,7 +19,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
   static const String _sessionId = 'demo-delivery-001';
 
   final MapController _mapController = MapController();
+
   StreamSubscription<LatLng>? _sub;
+  VoidCallback? _routeListener;
 
   LatLng _current = DemoRoute.points.first;
   double _zoom = 15;
@@ -43,6 +45,17 @@ class _ViewerScreenState extends State<ViewerScreen> {
         ..add(last);
     }
 
+    _routeListener = () {
+      if (!mounted) return;
+      setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _fitToFullRoute();
+        }
+      });
+    };
+    DemoRoute.revision.addListener(_routeListener!);
+
     _listenLocalFallback();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -59,7 +72,6 @@ class _ViewerScreenState extends State<ViewerScreen> {
     _sub = LocationBus.instance.stream.listen((loc) {
       if (!mounted) return;
 
-      // Respaldo local: solo agrega si no viene por remoto todavía
       setState(() {
         _current = loc;
         _lastReceivedAt = DateTime.now();
@@ -147,9 +159,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
           _mapController.move(point, _zoom);
         }
       },
-      onUpdate: (row) {
-        // No imprescindible para esta demo
-      },
+      onUpdate: (row) {},
       onSubscribed: () {
         if (!mounted) return;
 
@@ -175,6 +185,11 @@ class _ViewerScreenState extends State<ViewerScreen> {
   void dispose() {
     _sub?.cancel();
     TrackingRealtimeService.instance.dispose();
+
+    if (_routeListener != null) {
+      DemoRoute.revision.removeListener(_routeListener!);
+    }
+
     super.dispose();
   }
 
@@ -307,6 +322,18 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 Chip(
                   avatar: const Icon(Icons.storage, size: 18),
                   label: Text('Source: $_dataSource'),
+                ),
+                Chip(
+                  avatar: const Icon(Icons.flag, size: 18),
+                  label: Text(
+                    'A ${DemoRoute.pointA.latitude.toStringAsFixed(5)}, ${DemoRoute.pointA.longitude.toStringAsFixed(5)}',
+                  ),
+                ),
+                Chip(
+                  avatar: const Icon(Icons.place, size: 18),
+                  label: Text(
+                    'B ${DemoRoute.pointB.latitude.toStringAsFixed(5)}, ${DemoRoute.pointB.longitude.toStringAsFixed(5)}',
+                  ),
                 ),
               ],
             ),
